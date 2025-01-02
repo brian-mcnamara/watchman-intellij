@@ -12,7 +12,6 @@ class WatchmanService(val coroutineScope: CoroutineScope) {
     val watchmanConnection = if (OS.CURRENT == OS.Linux || OS.CURRENT == OS.macOS) {
         SocketWatchmanConnection()
     } else {
-        //TODO
         SocketWatchmanConnection()
     }
 

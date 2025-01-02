@@ -16,6 +16,8 @@ sealed interface Event {
                 jsonObject.containsKey("subscribe") -> SubscribedEvent.serializer()
                 jsonObject.containsKey("watch") -> WatcherEvent.serializer()
                 jsonObject.containsKey("subscription") -> SubscribeResult.serializer()
+                jsonObject.containsKey("unsubscribe") -> UnsubscribeEvent.serializer()
+                jsonObject.containsKey("watch-del") -> WatchDelEvent.serializer()
                 else -> serializer()
             }
         }
@@ -46,4 +48,10 @@ sealed interface Event {
 
     @Serializable
     data class WatcherEvent(val watcher: String, val watch: String): Event
+
+    @Serializable
+    data class UnsubscribeEvent(val unsubscribe: String, val deleted: Boolean): Event
+
+    @Serializable
+    data class WatchDelEvent(val root: String, val `watch-del`: Boolean): Event
 }

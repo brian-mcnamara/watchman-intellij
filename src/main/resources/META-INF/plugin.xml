@@ -8,7 +8,7 @@
 
 
     <extensions defaultExtensionNs="com.intellij">
-        <vfs.local.pluggableFileWatcher implementation="dev.bmac.intellij.watchman.WatchmanFileWatcher"/>
+        <vfs.local.pluggableFileWatcher implementation="dev.bmac.intellij.watchman.WatchmanFileWatcher" order="first"/>
     </extensions>
 
     <applicationListeners>

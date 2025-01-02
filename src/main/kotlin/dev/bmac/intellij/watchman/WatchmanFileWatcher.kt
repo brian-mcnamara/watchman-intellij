@@ -19,9 +19,11 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.collections.ArrayList
 import kotlin.io.path.pathString
+import kotlin.properties.Delegates
 
 class WatchmanFileWatcher: PluggableFileWatcher() {
     private lateinit var notificationSink: FileWatcherNotificationSink
+    private var hasWatchman by Delegates.notNull<Boolean>()
 
     private val watchmanConnection = WatchmanService.getService().watchmanConnection
     private val watchedRoots = ArrayList<String>()
@@ -33,59 +35,65 @@ class WatchmanFileWatcher: PluggableFileWatcher() {
     @Volatile
     private var setRootsJob: Job? = null
     private val ignoredRoots = CopyOnWriteArrayList(SmartList<String>())
-    private val hasWatchman by lazy {
-        WatchmanService.getService().coroutineScope.async {
-            WatchmanCommand.watchmanAvailable()
-        }
-    }
 
 
     override fun initialize(managingFS: ManagingFS, notificationSink: FileWatcherNotificationSink) {
-        //Disable the built in filewatcher
-        System.setProperty("idea.filewatcher.disabled", "true")
-        this.notificationSink = notificationSink
-        runBlocking {
-            watchmanConnection.startup()
-        }
+        hasWatchman = WatchmanCommand.watchmanAvailable()
+        if (hasWatchman) {
+            //Disable the built-in filewatcher
+            System.setProperty("idea.filewatcher.disabled", "true")
+            this.notificationSink = notificationSink
+            runBlocking {
+                watchmanConnection.startup()
+            }
 
-        WatchmanService.getService().coroutineScope.launch(Dispatchers.IO) {
-            watchmanConnection.notificationChannel.consumeEach { event ->
-                when(event) {
-                    is Event.SubscribeResult -> {
-                        for (file in event.files) {
-                            if (!file.new && file.exists) {
-                                notificationSink.notifyDirtyPath(Path.of(event.root, file.name).pathString)
-                            } else {
-                                notificationSink.notifyPathCreatedOrDeleted(Path.of(event.root, file.name).pathString)
+            WatchmanService.getService().coroutineScope.launch(Dispatchers.IO) {
+                watchmanConnection.notificationChannel.consumeEach { event ->
+                    when (event) {
+                        is Event.SubscribeResult -> {
+                            for (file in event.files) {
+                                if (!file.new && file.exists) {
+                                    notificationSink.notifyDirtyPath(Path.of(event.root, file.name).pathString)
+                                } else {
+                                    notificationSink.notifyPathCreatedOrDeleted(
+                                        Path.of(
+                                            event.root,
+                                            file.name
+                                        ).pathString
+                                    )
+                                }
                             }
                         }
-                    }
-                    is Event.SubscribedEvent -> {
-                        rootsInProgress.decrementAndGet()
-                    }
-                    is Event.ErrorEvent -> {
-                        event.getRoot()?.apply {
+
+                        is Event.SubscribedEvent -> {
                             rootsInProgress.decrementAndGet()
-                            ignoredRoots.add(this)
-                            notificationSink.notifyManualWatchRoots(this@WatchmanFileWatcher, ignoredRoots)
+                        }
+
+                        is Event.ErrorEvent -> {
+                            event.getRoot()?.apply {
+                                rootsInProgress.decrementAndGet()
+                                ignoredRoots.add(this)
+                                notificationSink.notifyManualWatchRoots(this@WatchmanFileWatcher, ignoredRoots)
+                            }
+                        }
+
+                        else -> {
+
                         }
                     }
-                    else -> {
 
-                    }
+
                 }
-
-
             }
         }
     }
 
     override fun dispose() {
-        TODO("Not yet implemented")
+        watchmanConnection.dispose()
     }
 
     override fun isOperational(): Boolean {
-        return hasWatchman.await()
+        return hasWatchman
     }
 
     override fun isSettingRoots(): Boolean {
@@ -131,7 +139,7 @@ class WatchmanFileWatcher: PluggableFileWatcher() {
     }
 
     override fun shutdown() {
-        "".toString()
+        watchmanConnection.shutdown()
     }
 
     private suspend fun unregister() {

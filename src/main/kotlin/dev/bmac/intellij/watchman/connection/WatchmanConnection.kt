@@ -1,39 +1,38 @@
 package dev.bmac.intellij.watchman.connection
 
+import com.intellij.execution.configurations.GeneralCommandLine
+import com.intellij.execution.process.ScriptRunnerUtil
+import com.intellij.openapi.Disposable
 import dev.bmac.intellij.watchman.connection.model.Event
-import io.ktor.utils.io.ByteChannel
-import io.ktor.utils.io.writeStringUtf8
+import dev.bmac.intellij.watchman.connection.model.Sockname
+import dev.bmac.intellij.watchman.connection.model.WatchmanQuery
+import io.ktor.utils.io.*
 import kotlinx.coroutines.channels.Channel
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.modules.SerializersModule
-import kotlinx.serialization.modules.polymorphic
-import kotlinx.serialization.modules.subclass
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
+import kotlin.reflect.full.callSuspend
+import kotlin.reflect.full.primaryConstructor
+import kotlin.reflect.jvm.kotlinFunction
 
-abstract class WatchmanConnection {
+abstract class WatchmanConnection: Disposable {
     val notificationChannel = Channel<Event>()
-    protected val sendChannel = ByteChannel(true)
-    private val module = SerializersModule {
-        polymorphic(Event::class) {
-            subclass(Event.ErrorEvent::class)
-            subclass(Event.SubscribeResult::class)
-            subclass(Event.WatcherEvent::class)
-            subclass(Event.SubscribedEvent::class)
-        }
-    }
-    protected val json = Json {
-        ignoreUnknownKeys = true
-        serializersModule = module
-    }
+    // Hack because there is a conflict with IJ ktor version
+    protected val sendChannel = ByteChannel::class.primaryConstructor!!.call(true)
+    val writeString = this::class.java.classLoader.loadClass("io.ktor.utils.io.ByteWriteChannelOperationsKt")
+        .getMethod("writeString",
+            ByteWriteChannel::class.java, String::class.java, Continuation::class.java).kotlinFunction
 
     abstract suspend fun startup()
+    abstract fun shutdown()
 
     suspend fun send(payload: String) {
-        sendChannel.writeStringUtf8("$payload \n")
+        writeString!!.callSuspend(sendChannel, "${payload.replace("\\", "\\\\")} \n")
     }
 
     protected suspend fun onReceive(result: String) {
         try {
-            json.decodeFromString<Event>(result).apply {
+            WatchmanQuery.json.decodeFromString<Event>(result).apply {
                 notificationChannel.send(this)
             }
         } catch (e: Exception) {
@@ -41,4 +40,7 @@ abstract class WatchmanConnection {
         }
     }
 
+    override fun dispose() {
+//        sendChannel.close()
+    }
 }
