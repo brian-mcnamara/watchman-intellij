@@ -2,6 +2,7 @@ package dev.bmac.intellij.watchman.connection
 
 import com.intellij.execution.configurations.GeneralCommandLine
 import com.intellij.execution.process.ScriptRunnerUtil
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.util.asSafely
 import dev.bmac.intellij.watchman.WatchmanService
 import dev.bmac.intellij.watchman.connection.model.Sockname
@@ -20,6 +21,8 @@ import kotlin.reflect.jvm.kotlinFunction
 
 class SocketWatchmanConnection: WatchmanConnection() {
 
+    private val log = Logger.getInstance(SocketWatchmanConnection::class.java)
+
     // TODO: This lovely hack is brought to you by the major version differences between 2.x (which is bundled in IJ)
     //  And 3.x which this plugin uses due to a fix added for Windows support...
     val readUtf8Line = this::class.java.classLoader.loadClass("io.ktor.utils.io.ByteReadChannelOperationsKt")
@@ -35,9 +38,10 @@ class SocketWatchmanConnection: WatchmanConnection() {
             WatchmanQuery.json.decodeFromString<Sockname>(it).getUnixSocket()
         }
 
+        log.debug("Using Watchman socket at ${socketPath}")
+
         selectorManager = SelectorManager(Dispatchers.IO)
         val socket = aSocket(selectorManager).tcp().connect(UnixSocketAddress(socketPath))
-
 
         WatchmanService.getService().coroutineScope.launch(Dispatchers.IO) {
             socket.attachForWriting(sendChannel)

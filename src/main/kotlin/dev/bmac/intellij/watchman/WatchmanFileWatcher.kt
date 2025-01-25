@@ -1,9 +1,11 @@
 package dev.bmac.intellij.watchman
 
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.vfs.local.FileWatcherNotificationSink
 import com.intellij.openapi.vfs.local.PluggableFileWatcher
 import com.intellij.openapi.vfs.newvfs.ManagingFS
 import com.intellij.util.SmartList
+import dev.bmac.intellij.watchman.connection.SocketWatchmanConnection
 import dev.bmac.intellij.watchman.connection.WatchmanCommand
 import dev.bmac.intellij.watchman.connection.model.Event
 import dev.bmac.intellij.watchman.connection.model.WatchmanQuery
@@ -16,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 import java.nio.file.Path
 import java.util.*
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.collections.ArrayList
 import kotlin.io.path.pathString
@@ -25,7 +28,7 @@ class WatchmanFileWatcher: PluggableFileWatcher() {
     private lateinit var notificationSink: FileWatcherNotificationSink
     private var hasWatchman by Delegates.notNull<Boolean>()
 
-    private val watchmanConnection = WatchmanService.getService().watchmanConnection
+    private val watchmanConnection = SocketWatchmanConnection()
     private val watchedRoots = ArrayList<String>()
     private val rootsInProgress = AtomicInteger(0)
     @Volatile
@@ -35,22 +38,27 @@ class WatchmanFileWatcher: PluggableFileWatcher() {
     @Volatile
     private var setRootsJob: Job? = null
     private val ignoredRoots = CopyOnWriteArrayList(SmartList<String>())
+    private val isRunning = AtomicBoolean(false)
+    private val log = Logger.getInstance(WatchmanFileWatcher::class.java)
 
 
     override fun initialize(managingFS: ManagingFS, notificationSink: FileWatcherNotificationSink) {
         hasWatchman = WatchmanCommand.watchmanAvailable()
         if (hasWatchman) {
+            log.info("Using Watchman file watcher")
             //Disable the built-in filewatcher
             System.setProperty("idea.filewatcher.disabled", "true")
             this.notificationSink = notificationSink
             runBlocking {
                 watchmanConnection.startup()
+                isRunning.set(true)
             }
 
             WatchmanService.getService().coroutineScope.launch(Dispatchers.IO) {
                 watchmanConnection.notificationChannel.consumeEach { event ->
                     when (event) {
                         is Event.SubscribeResult -> {
+                            log.debug("Watchman notification fired")
                             for (file in event.files) {
                                 if (!file.new && file.exists) {
                                     notificationSink.notifyDirtyPath(Path.of(event.root, file.name).pathString)
@@ -70,6 +78,7 @@ class WatchmanFileWatcher: PluggableFileWatcher() {
                         }
 
                         is Event.ErrorEvent -> {
+                            log.debug("Unable to watch path: ${event.getRoot()}")
                             event.getRoot()?.apply {
                                 rootsInProgress.decrementAndGet()
                                 ignoredRoots.add(this)
@@ -78,11 +87,9 @@ class WatchmanFileWatcher: PluggableFileWatcher() {
                         }
 
                         else -> {
-
+                            log.debug("Unhandled watchman event")
                         }
                     }
-
-
                 }
             }
         }
@@ -93,7 +100,7 @@ class WatchmanFileWatcher: PluggableFileWatcher() {
     }
 
     override fun isOperational(): Boolean {
-        return hasWatchman
+        return hasWatchman && isRunning.get()
     }
 
     override fun isSettingRoots(): Boolean {
@@ -101,7 +108,7 @@ class WatchmanFileWatcher: PluggableFileWatcher() {
     }
 
     override fun setWatchRoots(recursive: MutableList<String>, flat: MutableList<String>, shuttingDown: Boolean) {
-        if (!shuttingDown) {
+        if (!shuttingDown && isRunning.get()) {
             if (recursiveWatchedRoots == recursive && flatWatchedRoots == flat) {
                 notificationSink.notifyManualWatchRoots(this, ignoredRoots)
             } else {
@@ -130,7 +137,7 @@ class WatchmanFileWatcher: PluggableFileWatcher() {
                 }
             }
         } else {
-                "".toString()
+            log.debug("Attempted to set roots when watcher not running")
         }
     }
 
@@ -139,6 +146,10 @@ class WatchmanFileWatcher: PluggableFileWatcher() {
     }
 
     override fun shutdown() {
+        isRunning.set(false)
+        runBlocking {
+            unregister()
+        }
         watchmanConnection.shutdown()
     }
 

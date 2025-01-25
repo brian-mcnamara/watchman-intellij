@@ -1,21 +1,18 @@
 package dev.bmac.intellij.watchman.connection
 
-import com.intellij.execution.configurations.GeneralCommandLine
-import com.intellij.execution.process.ScriptRunnerUtil
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.diagnostic.Logger
 import dev.bmac.intellij.watchman.connection.model.Event
-import dev.bmac.intellij.watchman.connection.model.Sockname
 import dev.bmac.intellij.watchman.connection.model.WatchmanQuery
 import io.ktor.utils.io.*
 import kotlinx.coroutines.channels.Channel
 import kotlin.coroutines.Continuation
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 import kotlin.reflect.full.callSuspend
 import kotlin.reflect.full.primaryConstructor
 import kotlin.reflect.jvm.kotlinFunction
 
 abstract class WatchmanConnection: Disposable {
+    private val log = Logger.getInstance(WatchmanConnection::class.java)
     val notificationChannel = Channel<Event>()
     // Hack because there is a conflict with IJ ktor version
     protected val sendChannel = ByteChannel::class.primaryConstructor!!.call(true)
@@ -36,7 +33,7 @@ abstract class WatchmanConnection: Disposable {
                 notificationChannel.send(this)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            log.error("Unable to decode Watchman message", e)
         }
     }
 

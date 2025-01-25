@@ -9,12 +9,6 @@ import kotlinx.coroutines.CoroutineScope
 @Service(Service.Level.APP)
 class WatchmanService(val coroutineScope: CoroutineScope) {
 
-    val watchmanConnection = if (OS.CURRENT == OS.Linux || OS.CURRENT == OS.macOS) {
-        SocketWatchmanConnection()
-    } else {
-        SocketWatchmanConnection()
-    }
-
     companion object {
         fun getService() = ApplicationManager.getApplication().getService(WatchmanService::class.java)
     }
